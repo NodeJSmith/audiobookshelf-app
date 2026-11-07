@@ -3,7 +3,7 @@
     <app-audio-player ref="audioPlayer" :bookmarks="bookmarks" :sleep-timer-running="isSleepTimerRunning" :sleep-time-remaining="sleepTimeRemaining" :serverLibraryItemId="serverLibraryItemId" @selectPlaybackSpeed="showPlaybackSpeedModal = true" @updateTime="(t) => (currentTime = t)" @showSleepTimer="showSleepTimer" @showBookmarks="showBookmarks" />
 
     <modals-playback-speed-modal v-model="showPlaybackSpeedModal" :playback-rate.sync="playbackSpeed" @update:playbackRate="updatePlaybackSpeed" @change="changePlaybackSpeed" />
-    <modals-sleep-timer-modal v-model="showSleepTimerModal" :current-time="sleepTimeRemaining" :sleep-timer-running="isSleepTimerRunning" :current-end-of-chapter-time="currentEndOfChapterTime" :is-auto="isAutoSleepTimer" @change="selectSleepTimeout" @cancel="cancelSleepTimer" @increase="increaseSleepTimer" @decrease="decreaseSleepTimer" @increase-chapter="increaseSleepTimerByChapter" @decrease-chapter="decreaseSleepTimerByChapter" />
+    <modals-sleep-timer-modal v-model="showSleepTimerModal" :current-time="sleepTimeRemaining" :sleep-timer-running="isSleepTimerRunning" :current-end-of-chapter-time="currentEndOfChapterTime" :chapters-remaining="chaptersRemaining" :is-auto="isAutoSleepTimer" @change="selectSleepTimeout" @cancel="cancelSleepTimer" @increase="increaseSleepTimer" @decrease="decreaseSleepTimer" @increase-chapter="increaseSleepTimerByChapter" @decrease-chapter="decreaseSleepTimerByChapter" />
     <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime" :library-item-id="serverLibraryItemId" :playback-rate="playbackSpeed" @select="selectBookmark" />
   </div>
 </template>
@@ -36,6 +36,7 @@ export default {
       onMediaPlayerChangedListener: null,
       sleepInterval: null,
       currentEndOfChapterTime: 0,
+      chaptersRemaining: 0,
       serverLibraryItemId: null,
       serverEpisodeId: null
     }
@@ -85,16 +86,26 @@ export default {
       this.sleepTimeRemaining = sleepTimeRemaining
     },
     showSleepTimer() {
-      if (this.$refs.audioPlayer && this.$refs.audioPlayer.currentChapter) {
-        this.currentEndOfChapterTime = Math.floor(this.$refs.audioPlayer.currentChapter.end)
+      const player = this.$refs.audioPlayer
+      if (player && player.currentChapter) {
+        this.currentEndOfChapterTime = Math.floor(player.currentChapter.end)
+        this.chaptersRemaining = player.chapters.length - player.chapters.indexOf(player.currentChapter)
       } else {
         this.currentEndOfChapterTime = 0
+        this.chaptersRemaining = 0
       }
       this.showSleepTimerModal = true
     },
-    async selectSleepTimeout({ time, isChapterTime }) {
-      console.log('Setting sleep timer', time, isChapterTime)
-      var res = await AbsAudioPlayer.setSleepTimer({ time: String(isChapterTime ? 0 : time), isChapterTime })
+    async selectSleepTimeout({ time, isChapterTime, chapterCount = 1 }) {
+      console.log('Setting sleep timer', time, isChapterTime, chapterCount)
+      // For chapter timers, native takes the index of the chapter to stop at; 0 means the current chapter
+      let nativeTime = time
+      if (isChapterTime) {
+        const player = this.$refs.audioPlayer
+        const currentIndex = player.chapters.indexOf(player.currentChapter)
+        nativeTime = chapterCount > 1 ? Math.min(currentIndex + chapterCount - 1, player.chapters.length - 1) : 0
+      }
+      var res = await AbsAudioPlayer.setSleepTimer({ time: String(nativeTime), isChapterTime })
       if (!res.success) {
         return this.$toast.error('Sleep timer did not set, invalid time')
       }

@@ -8,7 +8,19 @@
 
     <div class="w-full h-full overflow-hidden absolute top-0 left-0 flex items-center justify-center" @click="show = false">
       <div class="w-full overflow-x-hidden overflow-y-auto bg-primary rounded-lg border border-border" style="max-height: 75%" @click.stop>
-        <div v-if="manualTimerModal" class="p-4">
+        <div v-if="chapterTimerModal" class="p-4">
+          <div class="flex mb-4" @click="chapterTimerModal = false">
+            <span class="material-symbols text-3xl">arrow_back</span>
+          </div>
+          <div class="flex my-2 justify-between items-center">
+            <ui-btn @click="decreaseChapterCount" class="w-9 h-9" :padding-x="0" small style="max-width: 36px"><span class="material-symbols text-lg">remove</span></ui-btn>
+            <p class="text-2xl font-mono text-center">{{ chapterCount }}</p>
+            <ui-btn @click="increaseChapterCount" class="w-9 h-9" :padding-x="0" small style="max-width: 36px"><span class="material-symbols text-lg">add</span></ui-btn>
+          </div>
+          <p class="text-center text-fg-muted mb-4">{{ chapterCount === 1 ? $strings.LabelChapter : $strings.LabelChapters }}</p>
+          <ui-btn @click="clickedChapterOption" class="w-full">{{ $strings.ButtonSetTimer }}</ui-btn>
+        </div>
+        <div v-else-if="manualTimerModal" class="p-4">
           <div class="flex mb-4" @click="manualTimerModal = false">
             <span class="material-symbols text-3xl">arrow_back</span>
           </div>
@@ -27,7 +39,7 @@
               </div>
             </li>
           </template>
-          <li v-if="currentEndOfChapterTime" class="text-fg select-none relative py-4" role="option" @click="clickedChapterOption(timeout)">
+          <li v-if="currentEndOfChapterTime" class="text-fg select-none relative py-4" role="option" @click="openChapterTimer">
             <div class="flex items-center justify-center">
               <span class="font-normal block truncate text-lg text-center">{{ $strings.LabelEndOfChapter }}</span>
             </div>
@@ -44,7 +56,7 @@
             <p class="text-2xl mx-2 font-mono text-center">{{ timeRemainingPretty }}</p>
             <ui-btn @click="increaseSleepTime" class="w-9 h-9" :padding-x="0" small style="max-width: 36px"><span class="material-symbols text-lg">add</span></ui-btn>
           </div>
-          <div v-if="multiChapterSleep" class="flex my-2 justify-between">
+          <div v-if="chaptersRemaining > 0" class="flex my-2 justify-between">
             <ui-btn @click="decreaseSleepTimeByChapter" class="w-9 h-9" :padding-x="0" small style="max-width: 36px"><span class="material-symbols text-lg">remove</span></ui-btn>
             <p class="text-2xl mx-2 font-mono text-center">{{ $strings.LabelChapter }}</p>
             <ui-btn @click="increaseSleepTimeByChapter" class="w-9 h-9" :padding-x="0" small style="max-width: 36px"><span class="material-symbols text-lg">add</span></ui-btn>
@@ -66,12 +78,15 @@ export default {
     currentTime: Number,
     sleepTimerRunning: Boolean,
     currentEndOfChapterTime: Number,
+    chaptersRemaining: Number,
     isAuto: Boolean
   },
   data() {
     return {
       manualTimerModal: false,
-      manualTimeoutMin: 1
+      manualTimeoutMin: 1,
+      chapterTimerModal: false,
+      chapterCount: 1
     }
   },
   computed: {
@@ -82,6 +97,7 @@ export default {
       set(val) {
         if (!val) {
           this.manualTimerModal = false
+          this.chapterTimerModal = false
         }
         this.$emit('input', val)
       }
@@ -95,16 +111,27 @@ export default {
     },
     isIos() {
       return this.$platform === 'ios'
-    },
-    multiChapterSleep() {
-      return this.$store.getters['getMultiChapterSleep']
     }
   },
   methods: {
+    async openChapterTimer() {
+      await this.$hapticsImpact()
+      this.chapterCount = 1
+      this.chapterTimerModal = true
+    },
+    async increaseChapterCount() {
+      await this.$hapticsImpact()
+      if (this.chapterCount < (this.chaptersRemaining || 1)) this.chapterCount++
+    },
+    async decreaseChapterCount() {
+      await this.$hapticsImpact()
+      if (this.chapterCount > 1) this.chapterCount--
+    },
     async clickedChapterOption() {
       await this.$hapticsImpact()
+      const chapterCount = this.chapterCount
       this.show = false
-      this.$nextTick(() => this.$emit('change', { time: this.currentEndOfChapterTime * 1000, isChapterTime: true }))
+      this.$nextTick(() => this.$emit('change', { time: this.currentEndOfChapterTime * 1000, isChapterTime: true, chapterCount }))
     },
     async clickedOption(timeoutMin) {
       await this.$hapticsImpact()
@@ -151,7 +178,6 @@ export default {
       if (this.manualTimeoutMin > 1) this.manualTimeoutMin--
     }
   },
-  mounted() {
-  }
+  mounted() {}
 }
 </script>
