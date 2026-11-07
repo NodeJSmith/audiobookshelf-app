@@ -36,6 +36,14 @@ jobs:
       - name: copy to Android project
         run: npx cap sync
 
+      # Fixed debug key so each build installs as an update over the last one
+      - name: install fork debug keystore
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          mkdir -p ~/.android
+          echo "$DEBUG_KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+
       - name: build Android app
         run: ./android/gradlew assembleDebug -p android --no-daemon
 
