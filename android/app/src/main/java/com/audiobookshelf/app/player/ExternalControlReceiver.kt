@@ -9,6 +9,8 @@ import androidx.core.content.ContextCompat
 // Within this far into a chapter, "previous" goes to the prior chapter instead of restarting this one
 private const val RESTART_CHAPTER_THRESHOLD_MS = 3000L
 
+private const val TAG = "ExternalControl"
+
 /**
  * Playback control for automation apps (Tasker, MacroDroid, adb), sent as broadcasts:
  *
@@ -17,42 +19,14 @@ private const val RESTART_CHAPTER_THRESHOLD_MS = 3000L
  *   <package>.action.NEXT_CHAPTER | PREVIOUS_CHAPTER
  *
  * <package> is the installed application id, e.g. com.audiobookshelf.app.debug.
+ *
+ * Send these as broadcasts while the app is running. Android blocks a broadcast from starting the
+ * player in the background, so to resume while the app is closed, send the same intent to
+ * ExternalControlActivity instead, which runs this briefly in the foreground and closes.
  */
 class ExternalControlReceiver : BroadcastReceiver() {
-  private val tag = "ExternalControl"
-
   override fun onReceive(context: Context, intent: Intent) {
-    val action = intent.action?.substringAfterLast(".action.") ?: return
-    val service = PlayerNotificationService.instance
-    val session = service?.currentPlaybackSession
-    Log.i(tag, "Received $action (session loaded=${session != null})")
-
-    if (service == null || session == null) {
-      if (action == PLAY || action == TOGGLE) resumeLastSession(context) else Log.i(tag, "$action ignored: nothing loaded")
-      return
-    }
-
-    val seconds = intent.getIntExtra(EXTRA_SECONDS, 0)
-    when (action) {
-      PLAY -> service.play()
-      PAUSE -> service.pause()
-      TOGGLE -> service.playPause()
-      JUMP_FORWARD -> if (seconds > 0) service.seekForward(seconds * 1000L) else service.jumpForward()
-      JUMP_BACKWARD -> if (seconds > 0) service.seekBackward(seconds * 1000L) else service.jumpBackward()
-      NEXT_CHAPTER -> nextChapterStartMs(service)?.let { service.seekPlayer(it) } ?: Log.i(tag, "No next chapter")
-      PREVIOUS_CHAPTER -> service.seekPlayer(previousChapterStartMs(service))
-      else -> Log.w(tag, "Unknown action $action")
-    }
-  }
-
-  private fun resumeLastSession(context: Context) {
-    val intent = Intent(context, PlayerNotificationService::class.java)
-      .setAction(PlayerNotificationService.ACTION_RESUME_LAST)
-    try {
-      ContextCompat.startForegroundService(context, intent)
-    } catch (e: Exception) {
-      Log.e(tag, "Could not start the player to resume the last session", e)
-    }
+    handleExternalControl(context, intent)
   }
 
   companion object {
@@ -64,6 +38,44 @@ class ExternalControlReceiver : BroadcastReceiver() {
     const val NEXT_CHAPTER = "NEXT_CHAPTER"
     const val PREVIOUS_CHAPTER = "PREVIOUS_CHAPTER"
     const val EXTRA_SECONDS = "seconds"
+  }
+}
+
+fun handleExternalControl(context: Context, intent: Intent) {
+  val action = intent.action?.substringAfterLast(".action.") ?: return
+  val service = PlayerNotificationService.instance
+  val session = service?.currentPlaybackSession
+  Log.i(TAG, "Received $action (session loaded=${session != null})")
+
+  if (service == null || session == null) {
+    if (action == ExternalControlReceiver.PLAY || action == ExternalControlReceiver.TOGGLE) {
+      resumeLastSession(context)
+    } else {
+      Log.i(TAG, "$action ignored: nothing loaded")
+    }
+    return
+  }
+
+  val seconds = intent.getIntExtra(ExternalControlReceiver.EXTRA_SECONDS, 0)
+  when (action) {
+    ExternalControlReceiver.PLAY -> service.play()
+    ExternalControlReceiver.PAUSE -> service.pause()
+    ExternalControlReceiver.TOGGLE -> service.playPause()
+    ExternalControlReceiver.JUMP_FORWARD -> if (seconds > 0) service.seekForward(seconds * 1000L) else service.jumpForward()
+    ExternalControlReceiver.JUMP_BACKWARD -> if (seconds > 0) service.seekBackward(seconds * 1000L) else service.jumpBackward()
+    ExternalControlReceiver.NEXT_CHAPTER -> nextChapterStartMs(service)?.let { service.seekPlayer(it) } ?: Log.i(TAG, "No next chapter")
+    ExternalControlReceiver.PREVIOUS_CHAPTER -> service.seekPlayer(previousChapterStartMs(service))
+    else -> Log.w(TAG, "Unknown action $action")
+  }
+}
+
+private fun resumeLastSession(context: Context) {
+  val intent = Intent(context, PlayerNotificationService::class.java)
+    .setAction(PlayerNotificationService.ACTION_RESUME_LAST)
+  try {
+    ContextCompat.startForegroundService(context, intent)
+  } catch (e: Exception) {
+    Log.e(TAG, "Could not start the player to resume the last session", e)
   }
 }
 

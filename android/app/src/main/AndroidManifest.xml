@@ -59,6 +59,26 @@
           </intent-filter>
         </receiver>
 
+        <!-- Same actions as an activity, so PLAY can resume while the app is closed -->
+        <activity
+          android:name=".player.ExternalControlActivity"
+          android:exported="true"
+          android:excludeFromRecents="true"
+          android:noHistory="true"
+          android:taskAffinity=""
+          android:theme="@android:style/Theme.Translucent.NoTitleBar">
+          <intent-filter>
+            <action android:name="${applicationId}.action.PLAY" />
+            <action android:name="${applicationId}.action.PAUSE" />
+            <action android:name="${applicationId}.action.TOGGLE" />
+            <action android:name="${applicationId}.action.JUMP_FORWARD" />
+            <action android:name="${applicationId}.action.JUMP_BACKWARD" />
+            <action android:name="${applicationId}.action.NEXT_CHAPTER" />
+            <action android:name="${applicationId}.action.PREVIOUS_CHAPTER" />
+            <category android:name="android.intent.category.DEFAULT" />
+          </intent-filter>
+        </activity>
+
         <!-- Used by Android Auto -->
         <meta-data
             android:name="com.google.android.gms.car.notification.SmallIcon"
