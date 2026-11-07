@@ -70,6 +70,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   companion object {
     const val ACTION_RESUME_LAST = "com.audiobookshelf.app.player.RESUME_LAST"
+    // The running service, for in-process callers with no binding (ExternalControlReceiver)
+    var instance: PlayerNotificationService? = null
 
     var isStarted = false
     var isClosed = false
@@ -340,6 +342,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   // detach player
   override fun onDestroy() {
+    instance = null
     try {
       val connectivityManager =
               getSystemService(ConnectivityManager::class.java) as ConnectivityManager
@@ -378,6 +381,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     Log.d(tag, "onCreate")
     super.onCreate()
     ctx = this
+    instance = this
 
     // Initialize Paper
     DbManager.initialize(ctx)

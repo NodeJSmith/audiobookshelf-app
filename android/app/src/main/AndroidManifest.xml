@@ -44,6 +44,21 @@
             android:resource="@xml/samsung_cover_widget_info" />
         </receiver>
 
+        <!-- Playback control broadcasts for automation apps (Tasker etc.) -->
+        <receiver
+          android:name=".player.ExternalControlReceiver"
+          android:exported="true">
+          <intent-filter>
+            <action android:name="${applicationId}.action.PLAY" />
+            <action android:name="${applicationId}.action.PAUSE" />
+            <action android:name="${applicationId}.action.TOGGLE" />
+            <action android:name="${applicationId}.action.JUMP_FORWARD" />
+            <action android:name="${applicationId}.action.JUMP_BACKWARD" />
+            <action android:name="${applicationId}.action.NEXT_CHAPTER" />
+            <action android:name="${applicationId}.action.PREVIOUS_CHAPTER" />
+          </intent-filter>
+        </receiver>
+
         <!-- Used by Android Auto -->
         <meta-data
             android:name="com.google.android.gms.car.notification.SmallIcon"
