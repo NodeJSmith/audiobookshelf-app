@@ -48,8 +48,22 @@ android {
       ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
   }
+  // Fork builds sign with a fixed key (CI writes it from a secret) so each APK installs over the last
+  def forkDebugKeystore = file('fork-debug.keystore')
+  signingConfigs {
+    forkDebug {
+      storeFile forkDebugKeystore
+      storePassword 'android'
+      keyAlias 'androiddebugkey'
+      keyPassword 'android'
+    }
+  }
+
   buildTypes {
     debug {
+      if (forkDebugKeystore.exists()) {
+        signingConfig signingConfigs.forkDebug
+      }
       applicationIdSuffix ".debug"
       versionNameSuffix "-debug"
       minifyEnabled false
