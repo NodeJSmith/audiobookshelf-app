@@ -2,7 +2,6 @@ package com.audiobookshelf.app.managers
 
 import android.content.Context
 import android.util.Log
-import com.audiobookshelf.app.BuildConfig
 import com.audiobookshelf.app.data.*
 import com.audiobookshelf.app.models.DownloadItem
 import com.audiobookshelf.app.plugins.AbsLog
@@ -29,7 +28,6 @@ class DbManager {
             ?: DeviceData(mutableListOf(), null, DeviceSettings.default(), null)
   }
   fun saveDeviceData(deviceData: DeviceData) {
-    if (BuildConfig.DEBUG) GraphDepthProbe.probe("saveDeviceData", deviceData)
     Paper.book("device").write("data", deviceData)
   }
 
