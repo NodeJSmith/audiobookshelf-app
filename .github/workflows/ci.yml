@@ -23,6 +23,7 @@ jobs:
     outputs:
       android: ${{ steps.filter.outputs.android }}
       ios: ${{ steps.filter.outputs.ios }}
+      js: ${{ steps.filter.outputs.js }}
       strings: ${{ steps.filter.outputs.strings }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
@@ -39,6 +40,7 @@ jobs:
               - '!ios/**'
               - '!**/*.md'
               - '!design/**'
+              - '!test/js/**'
               - '!.github/workflows/ios-testflight.yml'
               - '!.github/workflows/refresh-pod-lock.yml'
             ios:
@@ -46,6 +48,17 @@ jobs:
               - '!android/**'
               - '!**/*.md'
               - '!design/**'
+              - '!test/js/**'
+            # Everything but native code and docs. The native filters exclude test/js/** so a
+            # JS-test-only change doesn't start their builds; this one keeps it.
+            js:
+              - '**'
+              - '!ios/**'
+              - '!android/**'
+              - '!**/*.md'
+              - '!design/**'
+              - '!.github/workflows/ios-testflight.yml'
+              - '!.github/workflows/refresh-pod-lock.yml'
             strings:
               - 'strings/**'
 
@@ -80,6 +93,9 @@ jobs:
 
       - name: Sync Capacitor Android project
         run: npx cap sync
+
+      - name: Run Android unit tests
+        run: ./android/gradlew testDebugUnitTest -p android --no-daemon
 
       # Fixed debug key so each build installs as an update over the last one
       - name: Install fork debug keystore
@@ -141,19 +157,107 @@ jobs:
         working-directory: ios/App
         run: pod install --deployment
 
-      - name: Build iOS simulator app
+      # Picked at run time so runner-image updates don't break a hard-coded device name. Takes an
+      # iPhone on the newest runtime the selected Xcode supports; the image also ships newer
+      # runtimes for other Xcodes, which are slow to boot.
+      - name: Pick an iPhone simulator
+        id: simulator
+        run: |
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          echo "Simulator SDK: $sdk"
+          choice=$(xcrun simctl list devices available -j | jq -r --arg sdk "$sdk" '
+            ($sdk | split(".") | map(tonumber)) as $max
+            | [.devices | to_entries[]
+              | select(.key | test("SimRuntime\\.iOS-"))
+              | (.key | capture("iOS-(?<v>[0-9-]+)").v | split("-") | map(tonumber)) as $version
+              | select($version <= $max)
+              | .value[] | select(.name | startswith("iPhone"))
+              | {version: $version, name, udid}]
+            | sort_by(.version) | last // empty | "\(.udid) \(.name) (iOS \(.version | map(tostring) | join(".")))"')
+          if [ -z "$choice" ]; then
+            echo "::error::No available iPhone simulator on this runner"
+            exit 1
+          fi
+          echo "Using simulator: $choice"
+          echo "udid=${choice%% *}" >> "$GITHUB_OUTPUT"
+
+      # Not -quiet: this step also fails on a broken test target, and the log says which one.
+      - name: Build iOS simulator app and tests
         working-directory: ios/App
         run: |
-          xcodebuild -quiet \
+          xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Debug \
             -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
             -derivedDataPath build \
             ASSETCATALOG_COMPILER_APPICON_NAME=IconsDebug \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build-for-testing
+
+      - name: Run iOS unit tests
+        working-directory: ios/App
+        timeout-minutes: 15
+        run: |
+          status=0
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath build \
+            -resultBundlePath TestResults.xcresult \
+            -parallel-testing-enabled NO \
+            ASSETCATALOG_COMPILER_APPICON_NAME=IconsDebug \
+            CODE_SIGNING_ALLOWED=NO \
+            test-without-building || status=$?
+
+          # xcodebuild exits 0 when the test target contains no tests, so fail on an empty run.
+          counts=$(xcrun xcresulttool get test-results tests --path TestResults.xcresult | jq -r '
+            [.. | objects | select(.nodeType == "Test Case") | .result]
+            | "\(length) \(map(select(. == "Passed")) | length)"')
+          read -r total passed <<< "$counts"
+          echo "iOS unit tests: ${passed:-0} of ${total:-0} passed" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "${total:-0}" -eq 0 ]; then
+            echo "::error::No iOS unit tests ran"
+            status=1
+          fi
+          exit $status
+
+      - name: Upload iOS test results
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: ios-test-results
+          path: ios/App/TestResults.xcresult
+          if-no-files-found: warn
+
+  js-tests:
+    name: Run JavaScript tests
+    needs: changes
+    if: needs.changes.outputs.js == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: 24
+
+      # Plain npm ci: Vitest's bundler binaries are optional dependencies. The other jobs' --omit=optional
+      # only skips the darwin-only fsevents.
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Run JavaScript tests
+        run: npm test
 
   strings:
     name: Check strings are alphabetized
@@ -181,7 +285,7 @@ jobs:
     # for failure or cancellation alone isn't enough: a job GitHub cancels because no runner picked
     # it up doesn't report as cancelled here. changes is listed so a failed path filter fails this
     # check instead of every job it gates reading as skipped.
-    needs: [changes, android, ios, strings]
+    needs: [changes, android, ios, js-tests, strings]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -192,6 +296,8 @@ jobs:
           ANDROID_RESULT: ${{ needs.android.result }}
           IOS_WANTED: ${{ needs.changes.outputs.ios == 'true' || github.event_name == 'workflow_dispatch' }}
           IOS_RESULT: ${{ needs.ios.result }}
+          JS_WANTED: ${{ needs.changes.outputs.js == 'true' || github.event_name == 'workflow_dispatch' }}
+          JS_RESULT: ${{ needs.js-tests.result }}
           STRINGS_WANTED: ${{ needs.changes.outputs.strings == 'true' || github.event_name == 'workflow_dispatch' }}
           STRINGS_RESULT: ${{ needs.strings.result }}
         run: |
@@ -209,5 +315,6 @@ jobs:
           check changes true "$CHANGES_RESULT"
           check android "$ANDROID_WANTED" "$ANDROID_RESULT"
           check ios "$IOS_WANTED" "$IOS_RESULT"
+          check js-tests "$JS_WANTED" "$JS_RESULT"
           check strings "$STRINGS_WANTED" "$STRINGS_RESULT"
           exit $bad
