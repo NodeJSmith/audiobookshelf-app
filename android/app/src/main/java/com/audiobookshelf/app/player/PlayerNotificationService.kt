@@ -1006,7 +1006,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   fun getEndTimeOfChapterOrTrack(index: Int): Long? {
-    val chapter = currentPlaybackSession?.chapters[index]
+    val chapter = currentPlaybackSession?.chapters?.getOrNull(index)
     return if (chapter != null) {
       chapter.endMs
     } else {
