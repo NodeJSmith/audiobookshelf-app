@@ -98,14 +98,15 @@ export default {
     },
     async selectSleepTimeout({ time, isChapterTime, chapterCount = 1 }) {
       console.log('Setting sleep timer', time, isChapterTime, chapterCount)
-      // For chapter timers, native takes the index of the chapter to stop at; 0 means the current chapter
-      let nativeTime = time
+      let nativeTime = String(time)
       if (isChapterTime) {
         const player = this.$refs.audioPlayer
         const currentIndex = player.chapters.indexOf(player.currentChapter)
-        nativeTime = chapterCount > 1 ? Math.min(currentIndex + chapterCount - 1, player.chapters.length - 1) : 0
+        const stopIndex = Math.max(0, Math.min(currentIndex + chapterCount - 1, player.chapters.length - 1))
+        // Android's 0 means "the current chapter", which it tracks itself as chapters change
+        nativeTime = this.chapterSleepTime(chapterCount > 1 ? stopIndex : 0, stopIndex)
       }
-      var res = await AbsAudioPlayer.setSleepTimer({ time: String(nativeTime), isChapterTime })
+      var res = await AbsAudioPlayer.setSleepTimer({ time: nativeTime, isChapterTime })
       if (!res.success) {
         return this.$toast.error('Sleep timer did not set, invalid time')
       }
@@ -118,11 +119,8 @@ export default {
       AbsAudioPlayer.decreaseSleepTime({ time: '300000' })
     },
     async increaseSleepTimerByChapter() {
-      const currentSleepEndTime = this.$refs.audioPlayer.currentTime + this.sleepTimeRemaining
-      const sleepEndChapterIndex = this.$refs.audioPlayer.chapters.findIndex(
-        (ch) => Number(Number(ch.start).toFixed(2)) <= currentSleepEndTime
-          && Number(Number(ch.end).toFixed(2)) >= currentSleepEndTime
-      )
+      const { currentSleepEndTime, sleepEndChapterIndex } = this.sleepEndChapter()
+      if (sleepEndChapterIndex < 0) return
 
       // in the case where a user has mixed chapter increments with time increments
       // we want to make sure that we only skip to the end of the nearest chapter
@@ -137,7 +135,7 @@ export default {
       }
 
       const res = await AbsAudioPlayer.setSleepTimer({
-        time: String(nextChapterIndex),
+        time: this.chapterSleepTime(nextChapterIndex, nextChapterIndex),
         isChapterTime: true
       })
       if (!res.success) {
@@ -145,11 +143,8 @@ export default {
       }
     },
     async decreaseSleepTimerByChapter() {
-      const currentSleepEndTime = this.$refs.audioPlayer.currentTime + this.sleepTimeRemaining
-      const sleepEndChapterIndex = this.$refs.audioPlayer.chapters.findIndex(
-        (ch) => Number(Number(ch.start).toFixed(2)) <= currentSleepEndTime
-          && Number(Number(ch.end).toFixed(2)) >= currentSleepEndTime
-      )
+      const { currentSleepEndTime, sleepEndChapterIndex } = this.sleepEndChapter()
+      if (sleepEndChapterIndex < 0) return
 
       const prevChapter = this.$refs.audioPlayer.chapters[sleepEndChapterIndex - 1]
       if (!prevChapter || prevChapter.end <= this.$refs.audioPlayer.currentChapter.start) {
@@ -157,12 +152,35 @@ export default {
       }
 
       const res = await AbsAudioPlayer.setSleepTimer({
-        time: String(sleepEndChapterIndex - 1),
+        time: this.chapterSleepTime(sleepEndChapterIndex - 1, sleepEndChapterIndex - 1),
         isChapterTime: true
       })
       if (!res.success) {
         return this.$toast.error('Sleep timer did not set, invalid time')
       }
+    },
+    /**
+     * Where in the book the running sleep timer stops, and the index of the chapter that contains it
+     * (-1 when none does). iOS reports the time left in real time, divided by the playback speed, so
+     * it's scaled back to book time there.
+     */
+    sleepEndChapter() {
+      const player = this.$refs.audioPlayer
+      const bookTimeLeft = this.$platform === 'ios' ? this.sleepTimeRemaining * (this.playbackSpeed || 1) : this.sleepTimeRemaining
+      const currentSleepEndTime = player.currentTime + bookTimeLeft
+      const sleepEndChapterIndex = player.chapters.findIndex(
+        (ch) => Number(Number(ch.start).toFixed(2)) <= currentSleepEndTime
+          && Number(Number(ch.end).toFixed(2)) >= currentSleepEndTime
+      )
+      return { currentSleepEndTime, sleepEndChapterIndex }
+    },
+    /**
+     * The `time` a chapter sleep timer passes to native. Android's native timer takes a chapter
+     * index (`androidValue`); iOS's still takes the stop chapter's end time in ms, as upstream does.
+     */
+    chapterSleepTime(androidValue, stopIndex) {
+      if (this.$platform !== 'ios') return String(androidValue)
+      return String(Math.floor(this.$refs.audioPlayer.chapters[stopIndex].end) * 1000)
     },
     async cancelSleepTimer() {
       console.log('Canceling sleep timer')

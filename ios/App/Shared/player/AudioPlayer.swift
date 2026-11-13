@@ -51,7 +51,8 @@ class AudioPlayer: NSObject {
     internal var sleepTimeChapterToken: Any?
     internal var sleepTimer: Timer?
     internal var sleepTimeRemaining: Double?
-    
+    internal var sleepTimerLastPlayedAt: Date? // Wall-clock time a set timer last saw playback
+
     internal var currentTrackIndex = 0
     private var allPlayerItems:[AVPlayerItem] = []
     
@@ -224,6 +225,7 @@ class AudioPlayer: NSObject {
             self.sleepTimerObserverToken = self.audioPlayer.addPeriodicTimeObserver(forInterval: time, queue: self.queue) { [weak self] time in
                 guard let self = self else { return }
                 if self.isSleepTimerSet() {
+                    if self.isPlaying() { self.sleepTimerLastPlayedAt = Date() }
                     // Update the UI
                     NotificationCenter.default.post(name: NSNotification.Name(PlayerEvents.sleepSet.rawValue), object: nil)
                 }
@@ -341,7 +343,11 @@ class AudioPlayer: NSObject {
 
         // Update the progress
         self.updateNowPlaying()
-        
+
+        // Before re-arming anything: a timer paused overnight shouldn't stop this morning's listening.
+        // The countdown's ticker doesn't run while iOS suspends the app, so check here too.
+        self.expireSleepTimerIfPausedTooLong()
+
         // Handle a chapter sleep timer that may now be invalid
         self.handleTrackChangeForChapterSleepTimer()
     }

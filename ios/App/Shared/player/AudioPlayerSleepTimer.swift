@@ -8,6 +8,9 @@
 import Foundation
 import AVFoundation
 
+// A timer left paused this long is cleared, so one set at bedtime isn't still armed the next day
+private let sleepTimerPausedExpiration: TimeInterval = 60 * 60
+
 extension AudioPlayer {
     
     // MARK: - Public API
@@ -34,11 +37,14 @@ extension AudioPlayer {
         AbsLogger.info(message: "SLEEP TIMER: Sleeping in \(secondsUntilSleep) seconds")
         self.removeSleepTimer()
         self.sleepTimeRemaining = secondsUntilSleep
-        
+        self.sleepTimerLastPlayedAt = Date()
+
         DispatchQueue.runOnMainQueue {
             self.sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
                 if self?.isPlaying() ?? false {
                     self?.decrementSleepTimerIfRunning()
+                } else {
+                    self?.expireSleepTimerIfPausedTooLong()
                 }
             }
         }
@@ -57,7 +63,8 @@ extension AudioPlayer {
         
         // Schedule the observation time
         self.sleepTimeChapterStopAt = stopAt
-        
+        self.sleepTimerLastPlayedAt = Date()
+
         // Get the current track
         guard let playbackSession = self.getPlaybackSession() else { return }
         let currentTrack = playbackSession.audioTracks[currentTrackIndex]
@@ -107,14 +114,24 @@ extension AudioPlayer {
         self.sleepTimer = nil
         self.removeChapterSleepTimer()
         self.sleepTimeRemaining = nil
-        
+        self.sleepTimerLastPlayedAt = nil
+
         // Update the UI
         NotificationCenter.default.post(name: NSNotification.Name(PlayerEvents.sleepEnded.rawValue), object: self)
     }
-    
-    
+
+
     // MARK: - Internal helpers
-    
+
+    /// Clears a set timer that hasn't seen playback for `sleepTimerPausedExpiration`, so a timer set
+    /// at bedtime and paused overnight doesn't stop playback the next morning.
+    internal func expireSleepTimerIfPausedTooLong() {
+        guard self.isSleepTimerSet(), let lastPlayedAt = self.sleepTimerLastPlayedAt else { return }
+        guard Date().timeIntervalSince(lastPlayedAt) >= sleepTimerPausedExpiration else { return }
+        AbsLogger.info(message: "SLEEP TIMER: Paused over \(Int(sleepTimerPausedExpiration / 60)) min, clearing it")
+        self.removeSleepTimer()
+    }
+
     internal func handleTrackChangeForChapterSleepTimer() {
         if self.isChapterSleepTimerSet() {
             self.setChapterSleepTimer(stopAt: self.sleepTimeChapterStopAt)
