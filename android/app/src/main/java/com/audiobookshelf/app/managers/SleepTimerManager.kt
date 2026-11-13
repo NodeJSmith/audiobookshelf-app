@@ -14,6 +14,8 @@ import kotlin.concurrent.schedule
 import kotlin.math.roundToInt
 
 const val SLEEP_TIMER_CHIME_SOUND_VOLUME = 0.7f
+// A timer left paused this long is cleared, so one set at bedtime isn't still armed the next day
+const val SLEEP_TIMER_PAUSED_EXPIRATION = 60 * 60 * 1000L // 1h
 
 class SleepTimerManager
 constructor(private val playerNotificationService: PlayerNotificationService) {
@@ -27,6 +29,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
   private var isChapterSleepTimer: Boolean = false
   private var sleepTimerElapsed: Long = 0L
   private var sleepTimerFinishedAt: Long = 0L
+  private var sleepTimerLastPlayedAt: Long = 0L // Wall-clock time the timer last saw playback
   private var isAutoSleepTimer: Boolean = false // When timer was auto-set
   private var autoTimerDisabled: Boolean = false // Disable until out of auto timer period
   private var sleepTimerSessionId: String = ""
@@ -106,6 +109,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
     sleepTimerRunning = true
     sleepTimerFinishedAt = 0L
     sleepTimerElapsed = 0L
+    sleepTimerLastPlayedAt = System.currentTimeMillis()
     sessionId = playerNotificationService.currentPlaybackSession?.id
     setVolume(1f)
 
@@ -147,6 +151,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
             Timer("SleepTimer", false).schedule(0L, 1000L) {
               Handler(Looper.getMainLooper()).post {
                 if (getIsPlaying()) {
+                  sleepTimerLastPlayedAt = System.currentTimeMillis()
                   sleepTimerElapsed += 1000L
 
                   val sleepTimeSecondsRemaining =
@@ -192,10 +197,24 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
                   } else {
                     setVolume(1f)
                   }
+                } else {
+                  expireIfPausedTooLong()
                 }
               }
             }
     return true
+  }
+
+  /**
+   * Clears a running timer that has been paused for longer than SLEEP_TIMER_PAUSED_EXPIRATION, so a
+   * timer set at bedtime and paused overnight doesn't stop playback the next morning.
+   */
+  private fun expireIfPausedTooLong() {
+    if (!sleepTimerRunning) return
+    if (System.currentTimeMillis() - sleepTimerLastPlayedAt < SLEEP_TIMER_PAUSED_EXPIRATION) return
+    AbsLogger.info(tag, "expireIfPausedTooLong: sleep timer paused over ${SLEEP_TIMER_PAUSED_EXPIRATION / 60000} min, clearing it")
+    clearSleepTimer()
+    playerNotificationService.clientEventEmitter?.onSleepTimerSet(0, false)
   }
 
   /**
@@ -541,6 +560,9 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
    * @param playbackSessionId String - the playback session ID.
    */
   fun handleMediaPlayEvent(playbackSessionId: String) {
+    // The ticker may not have run while the phone slept, so check here too before resuming it
+    expireIfPausedTooLong()
+
     // Check if the playback session has changed
     // If it hasn't changed OR the sleep timer is running then check reset the timer
     //   e.g. You set a manual sleep timer for 10 mins, then decide to change books, the sleep timer
