@@ -132,9 +132,7 @@ jobs:
     if: needs.changes.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
     # Intel: the arm64 macOS pool regularly can't schedule a job within GitHub's wait limit.
     runs-on: macos-15-intel
-    # The build takes about 25 minutes; this leaves room for the test step's own 15-minute timeout
-    # plus the install and pod steps, so a hung test fails at its step and still uploads results.
-    timeout-minutes: 55
+    timeout-minutes: 45
     steps:
       - name: Check out sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
@@ -159,11 +157,9 @@ jobs:
         working-directory: ios/App
         run: pod install --deployment
 
-      # Picked at run time: a hard-coded device name breaks whenever the runner image changes
-      # its simulator set. Takes an iPhone on the newest iOS runtime the selected Xcode's SDK
-      # supports: the image also ships newer runtimes for other Xcodes, and booting one of those
-      # takes most of the test step's timeout. Runtime keys end in e.g. "iOS-18-2", compared as
-      # [18, 2]. Prints "<udid> <name> (iOS x.y)".
+      # Picked at run time so runner-image updates don't break a hard-coded device name. Takes an
+      # iPhone on the newest runtime the selected Xcode supports; the image also ships newer
+      # runtimes for other Xcodes, which are slow to boot.
       - name: Pick an iPhone simulator
         id: simulator
         run: |
@@ -218,32 +214,14 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             test-without-building || status=$?
 
-          # No early exit from here on: the summary and the check below run even when tests fail.
-          # The result bundle nests Test Plan > Unit test bundle > Test Suite > Test Case; list each
-          # executed test as "Suite/test()<tab>Passed|Failed|Skipped".
-          results=""
-          if json=$(xcrun xcresulttool get test-results tests --path TestResults.xcresult); then
-            results=$(printf '%s' "$json" | jq -r '
-              .. | objects | select(.nodeType == "Test Suite") | .name as $suite
-              | (.children // [])[] | select(.nodeType == "Test Case")
-              | "\($suite)/\(.name)\t\(.result)"') || status=1
-          else
-            echo "::error::Could not read TestResults.xcresult"
-            status=1
-          fi
-          {
-            echo "### iOS unit tests"
-            echo
-            echo '| Test | Result |'
-            echo '|---|---|'
-            printf '%s\n' "$results" | awk -F'\t' 'NF { print "| `" $1 "` | " $2 " |" }'
-          } >> "$GITHUB_STEP_SUMMARY"
-          printf '%s\n' "$results"
-
-          # PlayerTimeUtilsTests is the canary: if the test target or scheme loses its tests in a
-          # merge, xcodebuild runs nothing and exits 0, so require one of its tests to have passed.
-          if ! printf '%s\n' "$results" | awk -F'\t' '$1 ~ /^PlayerTimeUtilsTests\// && $2 == "Passed" { found = 1 } END { exit !found }'; then
-            echo "::error::No PlayerTimeUtilsTests test passed; check the AudiobookshelfUnitTests target and the App scheme"
+          # Like pytest's "no tests collected": a test target that compiled no tests still exits 0.
+          counts=$(xcrun xcresulttool get test-results tests --path TestResults.xcresult | jq -r '
+            [.. | objects | select(.nodeType == "Test Case") | .result]
+            | "\(length) \(map(select(. == "Passed")) | length)"')
+          read -r total passed <<< "$counts"
+          echo "iOS unit tests: ${passed:-0} of ${total:-0} passed" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "${total:-0}" -eq 0 ]; then
+            echo "::error::No iOS unit tests ran"
             status=1
           fi
           exit $status

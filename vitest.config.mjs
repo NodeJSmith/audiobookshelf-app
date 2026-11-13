@@ -11,6 +11,7 @@ export default defineConfig({
     alias: { '@': root, '~': root }
   },
   test: {
-    include: ['test/js/**/*.test.js']
+    // Vitest's default discovery (*.test.* and *.spec.*), limited to the JS test tree
+    dir: 'test/js'
   }
 })
