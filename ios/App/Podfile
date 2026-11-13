@@ -31,6 +31,10 @@ target 'Audiobookshelf' do
   
   pod 'RealmSwift', '~> 10'
   pod 'Alamofire', '~> 5.5'
+
+  target 'AudiobookshelfUnitTests' do
+    inherit! :search_paths
+  end
 end
 
 
