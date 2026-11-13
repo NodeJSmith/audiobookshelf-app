@@ -214,7 +214,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             test-without-building || status=$?
 
-          # Like pytest's "no tests collected": a test target that compiled no tests still exits 0.
+          # xcodebuild exits 0 when the test target contains no tests, so fail on an empty run.
           counts=$(xcrun xcresulttool get test-results tests --path TestResults.xcresult | jq -r '
             [.. | objects | select(.nodeType == "Test Case") | .result]
             | "\(length) \(map(select(. == "Passed")) | length)"')
