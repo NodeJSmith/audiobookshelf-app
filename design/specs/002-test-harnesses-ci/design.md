@@ -1,7 +1,7 @@
 # Design: Test harnesses in CI on all three sides
 
 **Date:** 2026-11-13
-**Status:** ratified
+**Status:** built
 **Mode:** sketch
 **Issues:** #6
 **Parent:** design/specs/001-test-foundation-milestone/design.md
@@ -232,7 +232,7 @@ Out of scope: any test of sleep-timer or bridge logic (#8, #9), the parity check
 
 - [x] Implementation and tests committed
 - [x] Docs: none needed (the testing guide is #10)
-- [ ] Ship-time challenge
+- [x] Ship-time challenge: three critics found no CRITICAL or HIGH issues. The user resolved the findings by simplifying to convention-based test discovery (D8 revision, D11) and returning the job timeout to 45 (D9 revision), and set the remaining edge cases aside. Run 43516079464 is green on all jobs, with 4 of 4 iOS tests passed through the synchronized folder.
 
 **Calls made during the build:**
 - Android test subject is `AudioTrack` (`data/AudioTrack.kt`: `startOffsetMs`/`durationMs`/`endOffsetMs`, `getBookChapter()`, `relPath`): the first class under `data/` with no `android.*` imports, and its members are Kotlin-only arithmetic. Verified locally: `testDebugUnitTest` runs 3 tests, 0 failures.
