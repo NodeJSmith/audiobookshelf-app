@@ -1,0 +1,51 @@
+name: Refresh Podfile.lock
+
+# CocoaPods only runs on macOS, and Podfile.lock has to match the Capacitor packages in
+# package-lock.json or `pod install --deployment` fails the iOS builds. After bumping a Capacitor
+# package, run this on the branch (`gh workflow run refresh-pod-lock.yml --ref <branch>`), then
+# download the artifact (`gh run download <run id> -n Podfile.lock -D ios/App`) and commit it.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Regenerate Podfile.lock
+    runs-on: macos-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci --omit=optional
+
+      - name: Build shared web app
+        run: npm run generate
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios/App
+        run: pod install
+
+      - name: Show the change
+        run: git diff --stat -- ios/App/Podfile.lock
+
+      - name: Upload Podfile.lock
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: Podfile.lock
+          path: ios/App/Podfile.lock
+          if-no-files-found: error
