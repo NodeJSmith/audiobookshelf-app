@@ -1,3 +1,13 @@
+# ABS+
+
+**This is a personal fork of the [Audiobookshelf mobile app](https://github.com/advplyr/audiobookshelf-app), not the official app.** It carries changes I want for my own use and is not kept in sync with upstream. Please report bugs in the official app to [advplyr/audiobookshelf-app](https://github.com/advplyr/audiobookshelf-app/issues), not here, and don't hold the Audiobookshelf maintainers responsible for anything in this fork.
+
+Android only. Builds are debug APKs from CI (app ID `com.audiobookshelf.app.debug`), so they install alongside the official app.
+
+The upstream README follows.
+
+---
+
 # Audiobookshelf Mobile App
 
 Audiobookshelf is a self-hosted audiobook and podcast server.
