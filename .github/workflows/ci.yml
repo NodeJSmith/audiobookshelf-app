@@ -114,9 +114,8 @@ jobs:
     name: Build iOS simulator app
     needs: changes
     if: needs.changes.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-latest
-    # macOS runners can queue for a long time under GitHub capacity limits; this bounds the job,
-    # not the wait for a runner.
+    # Intel: the arm64 macOS pool regularly can't schedule a job within GitHub's wait limit.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - name: Check out sources
@@ -178,19 +177,37 @@ jobs:
           directory: 'strings/'
 
   ci-complete:
-    # changes is listed so a failed path filter fails this check; otherwise every job it gates would
-    # be skipped and read as passing.
+    # Every job a change needs must succeed, and every job it doesn't need must be skipped. Checking
+    # for failure or cancellation alone isn't enough: a job GitHub cancels because no runner picked
+    # it up doesn't report as cancelled here. changes is listed so a failed path filter fails this
+    # check instead of every job it gates reading as skipped.
     needs: [changes, android, ios, strings]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Report result
         env:
-          FAILED: ${{ contains(needs.*.result, 'failure') }}
-          CANCELLED: ${{ contains(needs.*.result, 'cancelled') }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          ANDROID_WANTED: ${{ needs.changes.outputs.android == 'true' || github.event_name == 'workflow_dispatch' }}
+          ANDROID_RESULT: ${{ needs.android.result }}
+          IOS_WANTED: ${{ needs.changes.outputs.ios == 'true' || github.event_name == 'workflow_dispatch' }}
+          IOS_RESULT: ${{ needs.ios.result }}
+          STRINGS_WANTED: ${{ needs.changes.outputs.strings == 'true' || github.event_name == 'workflow_dispatch' }}
+          STRINGS_RESULT: ${{ needs.strings.result }}
         run: |
-          if [[ "$FAILED" == "true" || "$CANCELLED" == "true" ]]; then
-            echo "One or more CI jobs failed or were cancelled"
-            exit 1
-          fi
-          echo "All CI jobs passed or were skipped (no relevant changes)"
+          bad=0
+          check() {
+            local name=$1 wanted=$2 result=$3 expected=skipped
+            [ "$wanted" = true ] && expected=success
+            if [ "$result" = "$expected" ]; then
+              echo "ok: $name $result"
+            else
+              echo "::error::$name was $result, expected $expected"
+              bad=1
+            fi
+          }
+          check changes true "$CHANGES_RESULT"
+          check android "$ANDROID_WANTED" "$ANDROID_RESULT"
+          check ios "$IOS_WANTED" "$IOS_RESULT"
+          check strings "$STRINGS_WANTED" "$STRINGS_RESULT"
+          exit $bad

@@ -14,7 +14,8 @@ permissions:
 jobs:
   refresh:
     name: Regenerate Podfile.lock
-    runs-on: macos-latest
+    # Intel: the arm64 macOS pool regularly can't schedule a job within GitHub's wait limit.
+    runs-on: macos-15-intel
     steps:
       - name: Check out sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
