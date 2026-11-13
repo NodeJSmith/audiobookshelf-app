@@ -1,0 +1,213 @@
+name: CI
+
+# Every PR check lives here so one job, ci-complete, can be the required status check on master.
+# Jobs that don't apply to a change are skipped rather than left out, and ci-complete treats a
+# skip as a pass, so a path-filtered job never leaves a PR waiting on a check that will never run.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+      ios: ${{ steps.filter.outputs.ios }}
+      strings: ${{ steps.filter.outputs.strings }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        id: filter
+        with:
+          # A file counts for a filter only if it matches every pattern in it.
+          predicate-quantifier: every
+          filters: |
+            android:
+              - '**'
+              - '!ios/**'
+              - '!**/*.md'
+              - '!design/**'
+              - '!.github/workflows/ios-testflight.yml'
+              - '!.github/workflows/refresh-pod-lock.yml'
+            ios:
+              - '**'
+              - '!android/**'
+              - '!**/*.md'
+              - '!design/**'
+            strings:
+              - 'strings/**'
+
+  android:
+    name: Build Android APK
+    needs: changes
+    if: needs.changes.outputs.android == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: 20
+
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3  # v4.9.1
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install JavaScript dependencies
+        run: npm ci --omit=optional
+
+      - name: Build shared web app
+        run: npm run generate
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync
+
+      # Fixed debug key so each build installs as an update over the last one
+      - name: Install fork debug keystore
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          echo "$DEBUG_KEYSTORE_B64" | base64 -d > android/app/fork-debug.keystore
+
+      - name: Build Android app
+        run: ./android/gradlew assembleDebug -p android --no-daemon
+
+      - name: Check the APK is signed with the fork key
+        run: |
+          apk=$(ls android/app/build/outputs/apk/debug/*.apk | head -1)
+          signer=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$signer" verify --print-certs "$apk" | tee /dev/stderr | grep -q "SHA-256 digest: 8ec012b0280f5fb85149146a40ac86edf5ee1ae6849794ce0f3d1f3250040964"
+
+      - name: Rename APK
+        working-directory: android/app/build/outputs/apk/debug/
+        run: |
+          build="$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD)"
+          mv -v app-debug.apk "abs-plus-${build}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: abs-plus-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  ios:
+    name: Build iOS simulator app
+    needs: changes
+    if: needs.changes.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
+    # Intel: the arm64 macOS pool regularly can't schedule a job within GitHub's wait limit.
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Install JavaScript dependencies
+        run: npm ci --omit=optional
+
+      - name: Build shared web app
+        run: npm run generate
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios/App
+        run: pod install --deployment
+
+      - name: Build iOS simulator app
+        working-directory: ios/App
+        run: |
+          xcodebuild -quiet \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            ASSETCATALOG_COMPILER_APPICON_NAME=IconsDebug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  strings:
+    name: Check strings are alphabetized
+    needs: changes
+    if: needs.changes.outputs.strings == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: 20
+
+      - name: Check i18n files
+        uses: audiobookshelf/audiobookshelf-i18n-updater@f827a936bfaae6ceee4babf807bf8b5cc20efab4  # v1.3.0
+        with:
+          directory: 'strings/'
+
+  ci-complete:
+    # Every job a change needs must succeed, and every job it doesn't need must be skipped. Checking
+    # for failure or cancellation alone isn't enough: a job GitHub cancels because no runner picked
+    # it up doesn't report as cancelled here. changes is listed so a failed path filter fails this
+    # check instead of every job it gates reading as skipped.
+    needs: [changes, android, ios, strings]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report result
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          ANDROID_WANTED: ${{ needs.changes.outputs.android == 'true' || github.event_name == 'workflow_dispatch' }}
+          ANDROID_RESULT: ${{ needs.android.result }}
+          IOS_WANTED: ${{ needs.changes.outputs.ios == 'true' || github.event_name == 'workflow_dispatch' }}
+          IOS_RESULT: ${{ needs.ios.result }}
+          STRINGS_WANTED: ${{ needs.changes.outputs.strings == 'true' || github.event_name == 'workflow_dispatch' }}
+          STRINGS_RESULT: ${{ needs.strings.result }}
+        run: |
+          bad=0
+          check() {
+            local name=$1 wanted=$2 result=$3 expected=skipped
+            [ "$wanted" = true ] && expected=success
+            if [ "$result" = "$expected" ]; then
+              echo "ok: $name $result"
+            else
+              echo "::error::$name was $result, expected $expected"
+              bad=1
+            fi
+          }
+          check changes true "$CHANGES_RESULT"
+          check android "$ANDROID_WANTED" "$ANDROID_RESULT"
+          check ios "$IOS_WANTED" "$IOS_RESULT"
+          check strings "$STRINGS_WANTED" "$STRINGS_RESULT"
+          exit $bad
