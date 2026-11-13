@@ -236,4 +236,5 @@ Out of scope: any test of sleep-timer or bridge logic (#8, #9), the parity check
 - The iOS summary reads results with `xcrun xcresulttool get test-results tests` (Xcode 16+) instead of parsing xcodebuild's log, whose test-line format differs between serial and parallel runs. If the bundle can't be read, the step fails with its own error.
 - D8's check requires a `PlayerTimeUtilsTests` test to have *passed*, not just appeared, so skipping every case (e.g. `XCTSkip`) also fails the step.
 - `js-tests` has `timeout-minutes: 10`; the ledger set none, and the job runs in about a minute.
-- No D5 failure handling was needed yet; the first macOS run decides.
+- No D5 failure handling was needed: on the first macOS run (43507734347) all four `PlayerTimeUtilsTests` passed unchanged.
+- The simulator picker only takes runtimes no newer than the selected Xcode's simulator SDK (`xcrun --sdk iphonesimulator --show-sdk-version`). The first run picked "newest runtime" literally and got iOS 26.2 under Xcode 16.4 (SDK 18.5); waiting for that runtime took about 10.5 of the test step's 13.4 minutes, two minutes short of its 15-minute timeout.

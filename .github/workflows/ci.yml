@@ -160,15 +160,21 @@ jobs:
         run: pod install --deployment
 
       # Picked at run time: a hard-coded device name breaks whenever the runner image changes
-      # its simulator set. Takes an iPhone on the newest iOS runtime (runtime keys end in e.g.
-      # "iOS-18-2", compared as [18, 2]) and prints "<udid> <name> (iOS x.y)".
+      # its simulator set. Takes an iPhone on the newest iOS runtime the selected Xcode's SDK
+      # supports: the image also ships newer runtimes for other Xcodes, and booting one of those
+      # takes most of the test step's timeout. Runtime keys end in e.g. "iOS-18-2", compared as
+      # [18, 2]. Prints "<udid> <name> (iOS x.y)".
       - name: Pick an iPhone simulator
         id: simulator
         run: |
-          choice=$(xcrun simctl list devices available -j | jq -r '
-            [.devices | to_entries[]
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          echo "Simulator SDK: $sdk"
+          choice=$(xcrun simctl list devices available -j | jq -r --arg sdk "$sdk" '
+            ($sdk | split(".") | map(tonumber)) as $max
+            | [.devices | to_entries[]
               | select(.key | test("SimRuntime\\.iOS-"))
               | (.key | capture("iOS-(?<v>[0-9-]+)").v | split("-") | map(tonumber)) as $version
+              | select($version <= $max)
               | .value[] | select(.name | startswith("iPhone"))
               | {version: $version, name, udid}]
             | sort_by(.version) | last // empty | "\(.udid) \(.name) (iOS \(.version | map(tostring) | join(".")))"')
