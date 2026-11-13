@@ -29,7 +29,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
   private var isChapterSleepTimer: Boolean = false
   private var sleepTimerElapsed: Long = 0L
   private var sleepTimerFinishedAt: Long = 0L
-  private var sleepTimerLastPlayedAt: Long = 0L // Wall-clock time the timer last saw playback
+  private var sleepTimerLastPlayedAt: Long = 0L // elapsedRealtime when the timer last saw playback
   private var isAutoSleepTimer: Boolean = false // When timer was auto-set
   private var autoTimerDisabled: Boolean = false // Disable until out of auto timer period
   private var sleepTimerSessionId: String = ""
@@ -109,7 +109,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
     sleepTimerRunning = true
     sleepTimerFinishedAt = 0L
     sleepTimerElapsed = 0L
-    sleepTimerLastPlayedAt = System.currentTimeMillis()
+    sleepTimerLastPlayedAt = SystemClock.elapsedRealtime()
     sessionId = playerNotificationService.currentPlaybackSession?.id
     setVolume(1f)
 
@@ -151,7 +151,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
             Timer("SleepTimer", false).schedule(0L, 1000L) {
               Handler(Looper.getMainLooper()).post {
                 if (getIsPlaying()) {
-                  sleepTimerLastPlayedAt = System.currentTimeMillis()
+                  sleepTimerLastPlayedAt = SystemClock.elapsedRealtime()
                   sleepTimerElapsed += 1000L
 
                   val sleepTimeSecondsRemaining =
@@ -211,7 +211,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
    */
   private fun expireIfPausedTooLong() {
     if (!sleepTimerRunning) return
-    if (System.currentTimeMillis() - sleepTimerLastPlayedAt < SLEEP_TIMER_PAUSED_EXPIRATION) return
+    if (SystemClock.elapsedRealtime() - sleepTimerLastPlayedAt < SLEEP_TIMER_PAUSED_EXPIRATION) return
     AbsLogger.info(tag, "expireIfPausedTooLong: sleep timer paused over ${SLEEP_TIMER_PAUSED_EXPIRATION / 60000} min, clearing it")
     clearSleepTimer()
     playerNotificationService.clientEventEmitter?.onSleepTimerSet(0, false)

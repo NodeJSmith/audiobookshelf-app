@@ -2244,11 +2244,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   // Shake sensor used for sleep timer
   fun registerSensor() {
+    // Cancel first: a pending unregister from a just-cleared timer would otherwise drop the sensor under a new one
+    shakeSensorUnregisterTask?.cancel()
+    shakeSensorUnregisterTask = null
     if (isShakeSensorRegistered) {
       Log.i(tag, "Shake sensor already registered")
       return
     }
-    shakeSensorUnregisterTask?.cancel()
 
     Log.d(tag, "Registering shake SENSOR ${mAccelerometer?.isWakeUpSensor}")
     val success =
